@@ -1,0 +1,113 @@
+name: Sync release from private repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to copy from the private repo (example: v0.3.0). Leave empty to use the latest release.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate source token
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "ERROR: falta el secret PRIVATE_REPO_TOKEN"
+            exit 1
+          fi
+
+      - name: Get source release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          SOURCE_REPO: agb4455/JudoComp
+          TARGET_REPO: agb4455/judocomp-public
+        run: |
+          TAG="${{ inputs.tag_name }}"
+
+          if [ -z "$TAG" ]; then
+            echo "Looking for the latest release in $SOURCE_REPO"
+            TAG=$(gh release list --repo "$SOURCE_REPO" --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "No release found in $SOURCE_REPO"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          gh release view "$TAG" --repo "$SOURCE_REPO" --json name,tagName,body,isPrerelease > /tmp/source-release.json
+          echo "Found release: $TAG"
+
+      - name: Create release in public repo if it doesn't exist
+        id: ensure_target_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: agb4455/judocomp-public
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$TARGET_REPO" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NAME=$(jq -r '.name' /tmp/source-release.json)
+          BODY=$(jq -r '.body // empty' /tmp/source-release.json)
+          PRERELEASE=$(jq -r '.isPrerelease' /tmp/source-release.json)
+
+          printf '%s' "$BODY" > /tmp/release-body.md
+
+          if [ "$PRERELEASE" = "true" ]; then
+            gh release create "$TAG" \
+              --repo "$TARGET_REPO" \
+              --title "$NAME" \
+              --notes-file /tmp/release-body.md \
+              --prerelease
+          else
+            gh release create "$TAG" \
+              --repo "$TARGET_REPO" \
+              --title "$NAME" \
+              --notes-file /tmp/release-body.md
+          fi
+
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+      - name: Download assets from source release
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          SOURCE_REPO: agb4455/JudoComp
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          mkdir -p /tmp/release-assets
+          gh release download "$TAG" \
+            --repo "$SOURCE_REPO" \
+            --dir /tmp/release-assets
+
+      - name: Upload assets to public repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: agb4455/judocomp-public
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=(/tmp/release-assets/*)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No assets found for $TAG"
+            exit 0
+          fi
+
+          gh release upload "$TAG" --repo "$TARGET_REPO" "${files[@]}" --clobber
+
+      - name: Done
+        run: |
+          echo "✅ Release ${{ steps.release.outputs.tag }} synced to public repo"
