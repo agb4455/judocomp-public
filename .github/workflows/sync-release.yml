@@ -108,6 +108,44 @@ jobs:
 
           gh release upload "$TAG" --repo "$TARGET_REPO" "${files[@]}" --clobber
 
+      # The user documentation is written in the private repo and published here as it was at the
+      # release's tag, so it never tells about what is not released yet. Only the latest release
+      # brings it: syncing an older one again must not put back an older guide.
+      - uses: actions/checkout@v4
+
+      - name: Copy the user documentation of the release
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          SOURCE_REPO: agb4455/JudoComp
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          LATEST=$(gh release list --repo "$SOURCE_REPO" --limit 1 --json tagName --jq '.[0].tagName')
+          if [ "$TAG" != "$LATEST" ]; then
+            echo "$TAG is not the latest release ($LATEST): the documentation stays as it is"
+            exit 0
+          fi
+
+          mkdir -p /tmp/source
+          gh api "repos/$SOURCE_REPO/tarball/$TAG" | tar -xz -C /tmp/source --strip-components=1
+          if [ ! -f /tmp/source/CHANGELOG.md ]; then
+            echo "$TAG has no user documentation yet"
+            exit 0
+          fi
+
+          cp /tmp/source/CHANGELOG.md CHANGELOG.md
+          rm -rf docs
+          cp -r /tmp/source/docs docs
+          git add CHANGELOG.md docs
+          if git diff --cached --quiet; then
+            echo "The documentation is already the one of $TAG"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Documentation of $TAG"
+          git push
+
       - name: Done
         run: |
           echo "✅ Release ${{ steps.release.outputs.tag }} synced to public repo"
