@@ -35,3 +35,8 @@ archivo de la liga (`.comp`)**: tiene datos personales de los competidores, much
 
 El código de JudoComp no es público: este repositorio guarda las versiones, la documentación y las
 incidencias.
+
+## Licencia
+
+Todos los derechos reservados. Puedes descargar JudoComp y usarlo gratis para tus competiciones,
+pero no distribuirlo ni modificarlo sin permiso del autor. Detalles en [LICENSE](LICENSE).
