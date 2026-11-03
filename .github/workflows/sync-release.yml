@@ -31,8 +31,11 @@ jobs:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           SOURCE_REPO: agb4455/JudoComp
           TARGET_REPO: agb4455/judocomp-public
+          REQUESTED_TAG: ${{ inputs.tag_name }}
         run: |
-          TAG="${{ inputs.tag_name }}"
+          set -euo pipefail
+
+          TAG="${REQUESTED_TAG}"
 
           if [ -z "$TAG" ]; then
             echo "Looking for the latest release in $SOURCE_REPO"
@@ -41,6 +44,11 @@ jobs:
 
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
             echo "No release found in $SOURCE_REPO"
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "Invalid release tag: $TAG"
             exit 1
           fi
 
@@ -108,9 +116,6 @@ jobs:
 
           gh release upload "$TAG" --repo "$TARGET_REPO" "${files[@]}" --clobber
 
-      # The user documentation is written in the private repo and published here as it was at the
-      # release's tag, so it never tells about what is not released yet. Only the latest release
-      # brings it: syncing an older one again must not put back an older guide.
       - uses: actions/checkout@v4
 
       - name: Copy the user documentation of the release
@@ -147,5 +152,7 @@ jobs:
           git push
 
       - name: Done
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
-          echo "✅ Release ${{ steps.release.outputs.tag }} synced to public repo"
+          echo "✅ Release $TAG synced to public repo"
